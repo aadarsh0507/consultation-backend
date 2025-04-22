@@ -168,7 +168,7 @@ app.use((err, req, res, next) => {
 });
 
 // Connect to MongoDB and create admin user
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/consultationapp';
+const MONGODB_URI = process.env.MONGODB_URI || 'https://consultation-backend-nmyg.onrender.com';
 
 async function startServer() {
   try {
