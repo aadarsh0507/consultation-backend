@@ -143,11 +143,27 @@ app.use('/videos', (req, res, next) => {
     return res.status(500).json({ error: 'Storage path not configured' });
   }
   
-  // Set CORS headers
-  res.setHeader('Access-Control-Allow-Origin', 'https://consultationapp.netlify.app');
+// Allowed origins
+const allowedOrigins = [
+  'https://consultationapp.netlify.app',
+  'http://localhost:3000'
+];
+
+// Middleware to set CORS headers
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
+
+  next();
+});
+
   
   // Serve static files from the storage path
   express.static(storagePath)(req, res, next);
