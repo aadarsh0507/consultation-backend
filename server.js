@@ -28,7 +28,7 @@ app.use(express.json());
 
 // CORS configuration
 app.use(cors({
-  origin: 'https://consultationapp.netlify.app', // Your frontend URL
+ origin: ['https://consultationapp.netlify.app', 'http://localhost:3000']
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   credentials: true,
