@@ -10,7 +10,7 @@ const mongoSanitize = require('express-mongo-sanitize');
 const xss = require('xss-clean');
 const hpp = require('hpp');
 const fs = require('fs');
-const multer = require('multer');  // Add multer for file uploads
+const multer = require('multer');
 const User = require('./models/User');
 
 // Load environment variables
@@ -26,35 +26,44 @@ app.use(xss());
 app.use(hpp());
 app.use(express.json());
 
-// CORS configuration
-app.use(cors({
- origin: ['https://consultationapp.netlify.app', 'http://localhost:3000']
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  credentials: true,
-  preflightContinue: true,
-  exposedHeaders: ['Content-Range', 'Content-Length', 'Content-Type']
-}));
+// Allowed origins
+const allowedOrigins = [
+  'https://consultationapp.netlify.app',
+  'http://localhost:3000'
+];
 
-// Rate limiting with more generous limits for development
+// Global CORS middleware
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
+  next();
+});
+
+// Rate limiting middleware
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000, // Increased limit to 1000 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 1000,
   message: 'Too many requests from this IP, please try again later',
   standardHeaders: true,
   legacyHeaders: false
 });
 
-// Apply rate limiting to all routes except OPTIONS (preflight)
+// Apply rate limiting (skip OPTIONS)
 app.use((req, res, next) => {
   if (req.method === 'OPTIONS') {
-    next();
-  } else {
-    limiter(req, res, next);
+    return next();
   }
+  limiter(req, res, next);
 });
 
-// Function to get the latest storage path from the JSON file
+// Function to get the latest storage path
 const getStoragePath = () => {
   try {
     const config = JSON.parse(fs.readFileSync(path.join(__dirname, 'storagePath.json'), 'utf-8'));
@@ -65,32 +74,26 @@ const getStoragePath = () => {
   }
 };
 
-// POST request to update the storage path
+// Update storage path
 app.post('/update-storage-path', (req, res) => {
   const { newStoragePath } = req.body;
-
   if (!newStoragePath) {
     return res.status(400).json({ error: 'Storage path is required' });
   }
 
   const absolutePath = path.resolve(newStoragePath);
-
-  // Save the new storage path in storagePath.json
   try {
     fs.writeFileSync(path.join(__dirname, 'storagePath.json'), JSON.stringify({ path: absolutePath }, null, 2));
-
-    // Ensure the directory exists
     if (!fs.existsSync(absolutePath)) {
       fs.mkdirSync(absolutePath, { recursive: true });
     }
-
     res.json({ success: true, message: 'Storage path updated successfully', path: absolutePath });
   } catch (error) {
     res.status(500).json({ error: 'Error saving storage path', details: error.message });
   }
 });
 
-// GET request to retrieve the current storage path
+// Get current storage path
 app.get('/get-storage-path', (req, res) => {
   const storagePath = getStoragePath();
   if (!storagePath) {
@@ -99,73 +102,42 @@ app.get('/get-storage-path', (req, res) => {
   res.json({ path: storagePath });
 });
 
-// Setup multer storage configuration for video uploads
+// Multer config
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const storagePath = getStoragePath();
-    if (!storagePath) {
-      return cb(new Error('Storage path not set'), false);
-    }
-    // Ensure the directory exists
+    if (!storagePath) return cb(new Error('Storage path not set'), false);
     if (!fs.existsSync(storagePath)) {
       fs.mkdirSync(storagePath, { recursive: true });
     }
-    cb(null, storagePath); // Destination is the dynamically loaded storage path
+    cb(null, storagePath);
   },
   filename: (req, file, cb) => {
-    // Set the file name as per your requirement (e.g., original file name or a unique name)
-    cb(null, file.originalname);  // Save file with the original name
+    cb(null, file.originalname);
   }
 });
 
-// Initialize multer upload middleware
-const upload = multer({ storage: storage });
+const upload = multer({ storage });
 
-// POST request to save the video (using the dynamic storage path)
+// Save video endpoint
 app.post('/save-video', upload.single('videoFile'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No video file uploaded' });
   }
 
-  // Get the file path where the video is saved
   const videoPath = path.join(getStoragePath(), req.file.originalname);
-
   res.json({ success: true, message: 'Video saved successfully', videoPath });
 });
 
-// Middleware for logging requests
+// Logger
 app.use(morgan('dev'));
 
-// Serve videos from the dynamic storage path
+// Serve video files from dynamic storage path
 app.use('/videos', (req, res, next) => {
   const storagePath = getStoragePath();
   if (!storagePath) {
     return res.status(500).json({ error: 'Storage path not configured' });
   }
-  
-// Allowed origins
-const allowedOrigins = [
-  'https://consultationapp.netlify.app',
-  'http://localhost:3000'
-];
-
-// Middleware to set CORS headers
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  }
-
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-  res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
-
-  next();
-});
-
-  
-  // Serve static files from the storage path
   express.static(storagePath)(req, res, next);
 });
 
@@ -173,7 +145,7 @@ app.use((req, res, next) => {
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/consultations', require('./routes/consultations'));
 
-// Error handling middleware
+// Error handler
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({
@@ -183,23 +155,33 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Connect to MongoDB and create admin user
-const MONGODB_URI = process.env.MONGODB_URI || 'https://consultation-backend-nmyg.onrender.com';
+// MongoDB connect & server start
+const MONGODB_URI = process.env.MONGODB_URI;
+if (!MONGODB_URI) {
+  console.error('MONGODB_URI environment variable is not defined');
+  process.exit(1);
+}
 
 async function startServer() {
   try {
-    // Connect to MongoDB
+    // Add connection options with timeouts
     await mongoose.connect(MONGODB_URI, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
+      serverSelectionTimeoutMS: 5000, // 5 seconds timeout
+      socketTimeoutMS: 45000, // 45 seconds timeout
+      connectTimeoutMS: 10000 // 10 seconds timeout
     });
     console.log('Connected to MongoDB');
 
-    // Create default admin user
-    await User.createDefaultAdmin();
-    console.log('Admin user creation completed');
+    // Add error handling for admin creation
+    try {
+      await User.createDefaultAdmin();
+      console.log('Admin user creation completed');
+    } catch (adminError) {
+      console.error('Admin user creation error:', adminError);
+    }
 
-    // Start server
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
@@ -210,10 +192,9 @@ async function startServer() {
   }
 }
 
-// Start the server
 startServer();
 
-// Handle unhandled promise rejections
+// Handle unhandled rejections
 process.on('unhandledRejection', (err) => {
   console.error('Unhandled Promise Rejection:', err);
   process.exit(1);
