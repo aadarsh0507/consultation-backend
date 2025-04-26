@@ -119,8 +119,8 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-// Save video endpoint
-app.post('/api/save-video', upload.single('videoFile'), (req, res) => {
+// POST request to save the video (using the dynamic storage path)
+app.post('/save-video', upload.single('videoFile'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No video file uploaded' });
   }
@@ -132,8 +132,8 @@ app.post('/api/save-video', upload.single('videoFile'), (req, res) => {
 // Logger
 app.use(morgan('dev'));
 
-// Serve video files from dynamic storage path
-app.use('/api/videos', (req, res, next) => {
+// Serve videos from the dynamic storage path
+app.use('/videos', (req, res, next) => {
   const storagePath = getStoragePath();
   if (!storagePath) {
     return res.status(500).json({ error: 'Storage path not configured' });
