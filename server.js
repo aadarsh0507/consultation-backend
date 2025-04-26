@@ -75,7 +75,7 @@ const getStoragePath = () => {
 };
 
 // Update storage path
-app.post('/update-storage-path', (req, res) => {
+app.post('/api/update-storage-path', (req, res) => {
   const { newStoragePath } = req.body;
   if (!newStoragePath) {
     return res.status(400).json({ error: 'Storage path is required' });
@@ -94,7 +94,7 @@ app.post('/update-storage-path', (req, res) => {
 });
 
 // Get current storage path
-app.get('/get-storage-path', (req, res) => {
+app.get('/api/get-storage-path', (req, res) => {
   const storagePath = getStoragePath();
   if (!storagePath) {
     return res.status(400).json({ error: 'Storage path not found' });
@@ -120,7 +120,7 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 // POST request to save the video (using the dynamic storage path)
-app.post('/save-video', upload.single('videoFile'), (req, res) => {
+app.post('/api/save-video', upload.single('videoFile'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No video file uploaded' });
   }
@@ -133,7 +133,7 @@ app.post('/save-video', upload.single('videoFile'), (req, res) => {
 app.use(morgan('dev'));
 
 // Serve videos from the dynamic storage path
-app.use('/videos', (req, res, next) => {
+app.use('/api/videos', (req, res, next) => {
   const storagePath = getStoragePath();
   if (!storagePath) {
     return res.status(500).json({ error: 'Storage path not configured' });
