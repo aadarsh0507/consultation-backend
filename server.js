@@ -11,7 +11,9 @@ const xss = require('xss-clean');
 const hpp = require('hpp');
 const fs = require('fs');
 const multer = require('multer');
+const { Readable } = require('stream');
 const User = require('./models/User');
+const cloudinary = require('./cloudinaryConfig');
 
 // Load environment variables
 dotenv.config();
@@ -70,26 +72,26 @@ const getStoragePath = () => {
     return config.path;
   } catch (err) {
     console.error("Error reading storage path file:", err);
-    return null;
+    return 'default-folder'; // fallback folder
   }
 };
 
 // Update storage path
 app.post('/api/update-storage-path', (req, res) => {
   const { newStoragePath } = req.body;
+
   if (!newStoragePath) {
     return res.status(400).json({ error: 'Storage path is required' });
   }
 
-  const absolutePath = path.resolve(newStoragePath);
   try {
-    fs.writeFileSync(path.join(__dirname, 'storagePath.json'), JSON.stringify({ path: absolutePath }, null, 2));
-    if (!fs.existsSync(absolutePath)) {
-      fs.mkdirSync(absolutePath, { recursive: true });
-    }
-    res.json({ success: true, message: 'Storage path updated successfully', path: absolutePath });
+    fs.writeFileSync(
+      path.join(__dirname, 'storagePath.json'),
+      JSON.stringify({ path: newStoragePath }, null, 2)
+    );
+    res.json({ success: true, message: 'Cloudinary folder updated successfully', folder: newStoragePath });
   } catch (error) {
-    res.status(500).json({ error: 'Error saving storage path', details: error.message });
+    res.status(500).json({ error: 'Error saving Cloudinary folder name', details: error.message });
   }
 });
 
@@ -102,44 +104,39 @@ app.get('/api/get-storage-path', (req, res) => {
   res.json({ path: storagePath });
 });
 
-// Multer config
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const storagePath = getStoragePath();
-    if (!storagePath) return cb(new Error('Storage path not set'), false);
-    if (!fs.existsSync(storagePath)) {
-      fs.mkdirSync(storagePath, { recursive: true });
-    }
-    cb(null, storagePath);
-  },
-  filename: (req, file, cb) => {
-    cb(null, file.originalname);
-  }
-});
+// Multer config (in-memory for Cloudinary)
+const upload = multer({ storage: multer.memoryStorage() });
 
-const upload = multer({ storage });
-
-// POST request to save the video (using the dynamic storage path)
+// POST request to save the video (using Cloudinary)
 app.post('/api/save-video', upload.single('videoFile'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No video file uploaded' });
   }
 
-  const videoPath = path.join(getStoragePath(), req.file.originalname);
-  res.json({ success: true, message: 'Video saved successfully', videoPath });
+  const folder = getStoragePath();
+  const stream = cloudinary.uploader.upload_stream(
+    {
+      resource_type: 'video',
+      folder: folder
+    },
+    (error, result) => {
+      if (error) {
+        return res.status(500).json({ error: error.message });
+      }
+      return res.json({
+        success: true,
+        message: 'Video uploaded successfully to Cloudinary',
+        videoUrl: result.secure_url,
+        publicId: result.public_id
+      });
+    }
+  );
+
+  Readable.from(req.file.buffer).pipe(stream);
 });
 
 // Logger
 app.use(morgan('dev'));
-
-// Serve videos from the dynamic storage path
-app.use('/api/videos', (req, res, next) => {
-  const storagePath = getStoragePath();
-  if (!storagePath) {
-    return res.status(500).json({ error: 'Storage path not configured' });
-  }
-  express.static(storagePath)(req, res, next);
-});
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
@@ -164,17 +161,15 @@ if (!MONGODB_URI) {
 
 async function startServer() {
   try {
-    // Add connection options with timeouts
     await mongoose.connect(MONGODB_URI, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
-      serverSelectionTimeoutMS: 5000, // 5 seconds timeout
-      socketTimeoutMS: 45000, // 45 seconds timeout
-      connectTimeoutMS: 10000 // 10 seconds timeout
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+      connectTimeoutMS: 10000
     });
     console.log('Connected to MongoDB');
 
-    // Add error handling for admin creation
     try {
       await User.createDefaultAdmin();
       console.log('Admin user creation completed');
@@ -194,7 +189,6 @@ async function startServer() {
 
 startServer();
 
-// Handle unhandled rejections
 process.on('unhandledRejection', (err) => {
   console.error('Unhandled Promise Rejection:', err);
   process.exit(1);
