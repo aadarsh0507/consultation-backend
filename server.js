@@ -13,12 +13,9 @@ const fs = require('fs');
 const multer = require('multer');
 const { Readable } = require('stream');
 const User = require('./models/User');
-const cloudinary = require('./cloudinaryConfig');
+const cloudinary = require('./cloudinaryConfig'); // ✅ uses .env
+dotenv.config(); // ✅ Load .env first
 
-// Load environment variables
-dotenv.config();
-
-// Create Express app
 const app = express();
 
 // Security middleware
@@ -28,13 +25,11 @@ app.use(xss());
 app.use(hpp());
 app.use(express.json());
 
-// Allowed origins
+// CORS setup
 const allowedOrigins = [
   'https://consultationapp.netlify.app',
   'http://localhost:3000'
 ];
-
-// Global CORS middleware
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (allowedOrigins.includes(origin)) {
@@ -48,7 +43,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Rate limiting middleware
+// Rate limiter (skip OPTIONS)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 1000,
@@ -56,34 +51,27 @@ const limiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false
 });
-
-// Apply rate limiting (skip OPTIONS)
 app.use((req, res, next) => {
-  if (req.method === 'OPTIONS') {
-    return next();
-  }
+  if (req.method === 'OPTIONS') return next();
   limiter(req, res, next);
 });
 
-// Function to get the latest storage path
+// ===== Storage Path Config =====
 const getStoragePath = () => {
   try {
     const config = JSON.parse(fs.readFileSync(path.join(__dirname, 'storagePath.json'), 'utf-8'));
-    return config.path;
+    return config.path || 'default-folder';
   } catch (err) {
-    console.error("Error reading storage path file:", err);
-    return 'default-folder'; // fallback folder
+    console.error('Error reading storagePath.json:', err.message);
+    return 'default-folder';
   }
 };
 
-// Update storage path
 app.post('/api/update-storage-path', (req, res) => {
   const { newStoragePath } = req.body;
-
   if (!newStoragePath) {
     return res.status(400).json({ error: 'Storage path is required' });
   }
-
   try {
     fs.writeFileSync(
       path.join(__dirname, 'storagePath.json'),
@@ -91,23 +79,19 @@ app.post('/api/update-storage-path', (req, res) => {
     );
     res.json({ success: true, message: 'Cloudinary folder updated successfully', folder: newStoragePath });
   } catch (error) {
-    res.status(500).json({ error: 'Error saving Cloudinary folder name', details: error.message });
+    res.status(500).json({ error: 'Error saving Cloudinary folder', details: error.message });
   }
 });
 
-// Get current storage path
 app.get('/api/get-storage-path', (req, res) => {
-  const storagePath = getStoragePath();
-  if (!storagePath) {
-    return res.status(400).json({ error: 'Storage path not found' });
-  }
-  res.json({ path: storagePath });
+  const path = getStoragePath();
+  if (!path) return res.status(400).json({ error: 'Storage path not found' });
+  res.json({ path });
 });
 
-// Multer config (in-memory for Cloudinary)
+// ===== Cloudinary Video Upload =====
 const upload = multer({ storage: multer.memoryStorage() });
 
-// POST request to save the video (using Cloudinary)
 app.post('/api/save-video', upload.single('videoFile'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No video file uploaded' });
@@ -117,13 +101,13 @@ app.post('/api/save-video', upload.single('videoFile'), (req, res) => {
   const stream = cloudinary.uploader.upload_stream(
     {
       resource_type: 'video',
-      folder: folder
+      folder
     },
     (error, result) => {
       if (error) {
         return res.status(500).json({ error: error.message });
       }
-      return res.json({
+      res.json({
         success: true,
         message: 'Video uploaded successfully to Cloudinary',
         videoUrl: result.secure_url,
@@ -135,27 +119,25 @@ app.post('/api/save-video', upload.single('videoFile'), (req, res) => {
   Readable.from(req.file.buffer).pipe(stream);
 });
 
-// Logger
+// ===== Logging and Routes =====
 app.use(morgan('dev'));
-
-// Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/consultations', require('./routes/consultations'));
 
-// Error handler
+// ===== Global Error Handler =====
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  console.error('Unhandled error:', err);
   res.status(500).json({
     success: false,
-    message: 'Something went wrong!',
+    message: 'Internal Server Error',
     error: process.env.NODE_ENV === 'development' ? err.message : undefined
   });
 });
 
-// MongoDB connect & server start
+// ===== MongoDB + Server Startup =====
 const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) {
-  console.error('MONGODB_URI environment variable is not defined');
+  console.error('❌ MONGODB_URI is not defined in .env');
   process.exit(1);
 }
 
@@ -168,28 +150,29 @@ async function startServer() {
       socketTimeoutMS: 45000,
       connectTimeoutMS: 10000
     });
-    console.log('Connected to MongoDB');
+    console.log('✅ Connected to MongoDB');
 
     try {
       await User.createDefaultAdmin();
-      console.log('Admin user creation completed');
+      console.log('✅ Admin user ensured');
     } catch (adminError) {
-      console.error('Admin user creation error:', adminError);
+      console.error('⚠️ Admin creation error:', adminError);
     }
 
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
+      console.log(`🚀 Server running on http://localhost:${PORT}`);
     });
   } catch (err) {
-    console.error('Error during server startup:', err);
+    console.error('❌ Server startup error:', err);
     process.exit(1);
   }
 }
 
 startServer();
 
+// ===== Exit on unhandled promise rejections =====
 process.on('unhandledRejection', (err) => {
-  console.error('Unhandled Promise Rejection:', err);
+  console.error('Unhandled Rejection:', err);
   process.exit(1);
 });
