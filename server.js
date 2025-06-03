@@ -27,6 +27,7 @@ app.use(express.json());
 
 // CORS setup
 const allowedOrigins = [
+  'https://consultation-frontend-5fq9.vercel.app/doctor-login'
   'https://consultationapp.netlify.app',
   'http://localhost:3000'
 ];
